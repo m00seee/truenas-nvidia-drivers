@@ -29,6 +29,7 @@ jobs:
 
       - name: Checkout scale-build submodule at target version
         run: |
+          git config --global --add safe.directory '*'
           git submodule update --init --remote scale-build
           cd scale-build
           git fetch origin ${{ github.event.inputs.truenas_version }}
