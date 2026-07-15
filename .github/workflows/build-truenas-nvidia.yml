@@ -4,13 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       truenas_version:
-        description: 'TrueNAS version (e.g. 26.0.0)'
+        description: 'TrueNAS version string (exact, e.g. 26.0.0-MASTER+20260610-020149)'
+        required: true
+        default: '26.0.0-MASTER+20260610-020149'
+      truenas_train:
+        description: 'TrueNAS train name (e.g. TrueNAS-26-Nightlies)'
+        required: true
+        default: 'TrueNAS-26-Nightlies'
+      scale_build_ref:
+        description: 'scale-build branch or commit to build from'
         required: true
         default: '26.0.0'
-      truenas_train:
-        description: 'TrueNAS train name (e.g. Halfmoon)'
-        required: true
-        default: 'Halfmoon'
 
 jobs:
   build:
@@ -32,8 +36,8 @@ jobs:
           git config --global --add safe.directory '*'
           git submodule update --init --remote scale-build
           cd scale-build
-          git fetch origin ${{ github.event.inputs.truenas_version }}
-          git checkout ${{ github.event.inputs.truenas_version }}
+          git fetch origin ${{ github.event.inputs.scale_build_ref }}
+          git checkout ${{ github.event.inputs.scale_build_ref }}
 
       - name: Install build dependencies
         run: |
@@ -59,14 +63,14 @@ jobs:
       - name: Build packages
         working-directory: scale-build
         env:
-          TRUENAS_TRAIN: TrueNAS-SCALE-${{ github.event.inputs.truenas_train }}
+          TRUENAS_TRAIN: ${{ github.event.inputs.truenas_train }}
           TRUENAS_VERSION: ${{ github.event.inputs.truenas_version }}
         run: make packages
 
       - name: Build update image
         working-directory: scale-build
         env:
-          TRUENAS_TRAIN: TrueNAS-SCALE-${{ github.event.inputs.truenas_train }}
+          TRUENAS_TRAIN: ${{ github.event.inputs.truenas_train }}
           TRUENAS_VERSION: ${{ github.event.inputs.truenas_version }}
         run: make update
 
@@ -101,7 +105,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: truenas-nvidia-${{ github.event.inputs.truenas_version }}
+          name: truenas-nvidia-${{ github.event.inputs.scale_build_ref }}
           path: |
             artifacts/TrueNAS-SCALE-*.update
             artifacts/TrueNAS-SCALE-*.update.sha256
