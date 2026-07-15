@@ -10,7 +10,7 @@ on:
       truenas_train:
         description: 'TrueNAS train name (e.g. Goldeye)'
         required: true
-        default: 'Goldeye'
+        default: 'Halfmoon'
 
 jobs:
   build:
