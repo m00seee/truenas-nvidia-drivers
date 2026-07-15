@@ -1,0 +1,109 @@
+name: Build TrueNAS NVIDIA Extension
+
+on:
+  workflow_dispatch:
+    inputs:
+      truenas_version:
+        description: 'TrueNAS version (e.g. 26.0.0)'
+        required: true
+        default: '26.0.0'
+      truenas_train:
+        description: 'TrueNAS train name (e.g. Goldeye)'
+        required: true
+        default: 'Goldeye'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:bookworm
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Checkout scale-build submodule at target version
+        run: |
+          git submodule update --init --remote scale-build
+          cd scale-build
+          git fetch origin ${{ github.event.inputs.truenas_version }}
+          git checkout ${{ github.event.inputs.truenas_version }}
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            build-essential \
+            debootstrap \
+            git \
+            python3-pip \
+            python3-venv \
+            squashfs-tools \
+            unzip \
+            libjson-perl \
+            rsync \
+            libarchive-tools
+
+      - name: Checkout TrueNAS sources
+        working-directory: scale-build
+        run: make checkout
+
+      - name: Apply patches
+        working-directory: scale-build
+        run: git apply ${{ github.workspace }}/patches/0001-remove-nvidia-open-source-driver.patch
+
+      - name: Build packages
+        working-directory: scale-build
+        env:
+          TRUENAS_TRAIN: TrueNAS-SCALE-${{ github.event.inputs.truenas_train }}
+          TRUENAS_VERSION: ${{ github.event.inputs.truenas_version }}
+        run: make packages
+
+      - name: Build update image
+        working-directory: scale-build
+        env:
+          TRUENAS_TRAIN: TrueNAS-SCALE-${{ github.event.inputs.truenas_train }}
+          TRUENAS_VERSION: ${{ github.event.inputs.truenas_version }}
+        run: make update
+
+      - name: Extract nvidia.raw from rootfs
+        working-directory: scale-build
+        run: |
+          mkdir -p ${{ github.workspace }}/artifacts/extensions
+          if mount ./tmp/update/rootfs.squashfs tmpfile/rootfs 2>/dev/null; then
+            cp ./tmpfile/rootfs/usr/share/truenas/sysext-extensions/nvidia.raw \
+               ${{ github.workspace }}/artifacts/extensions/nvidia.raw
+            umount tmpfile/rootfs
+          else
+            echo "mount failed, falling back to unsquashfs"
+            unsquashfs -d tmpfile/rootfs ./tmp/update/rootfs.squashfs \
+              usr/share/truenas/sysext-extensions/nvidia.raw
+            cp tmpfile/rootfs/usr/share/truenas/sysext-extensions/nvidia.raw \
+               ${{ github.workspace }}/artifacts/extensions/nvidia.raw
+          fi
+
+      - name: Copy release artifacts
+        working-directory: scale-build
+        run: |
+          mv ./tmp/release/* ${{ github.workspace }}/artifacts/
+
+      - name: Generate checksums
+        run: |
+          sha256sum artifacts/extensions/nvidia.raw | awk '{print $1}' \
+            > artifacts/extensions/nvidia.raw.sha256
+          find artifacts -name "*.update" -exec sh -c \
+            'sha256sum "$1" | awk "{print \$1}" > "$1.sha256"' _ {} \;
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: truenas-nvidia-${{ github.event.inputs.truenas_version }}
+          path: |
+            artifacts/TrueNAS-SCALE-*.update
+            artifacts/TrueNAS-SCALE-*.update.sha256
+            artifacts/extensions/nvidia.raw
+            artifacts/extensions/nvidia.raw.sha256
+            artifacts/manifest.json
+          retention-days: 30
